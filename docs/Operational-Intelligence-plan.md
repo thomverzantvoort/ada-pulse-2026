@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-This document defines the implementation plan for the Operational Intelligence domain of the Pulse platform, based on the current repository state in `ada-pulse-2026.zip`.
+This document defines the implementation plan for the Operational Intelligence domain of the Pulse platform, based on the current repository state in `ada-pulse-2026`.
 
 The implementation up to KPI & Analytics is already partly available in the project. Therefore, this plan does not assume a greenfield setup. It extends the existing GCS to BigQuery to Pub/Sub pipeline with the missing Operational Intelligence layer.
 
@@ -25,12 +25,15 @@ Operational Intelligence consumes KPI data. It does not compute KPIs, ingest sou
 
 ## 2. Current Repository State
 
-The uploaded project ZIP contains the following relevant implementation state.
+The repository contains the following relevant implementation state.
 
 ### 2.1 Existing project structure
 
 ```text
 ada-pulse-2026/
+  CURRENT_STATE.md
+  README.md
+
   app/
     infra/
       data-ingest-uploader/
@@ -40,6 +43,15 @@ ada-pulse-2026/
       kpi-compute/
         main.py
         requirements.txt
+      kpi-serving/
+        main.py
+        router_kpis.py
+        bq_repository.py
+        schemas.py
+        config.py
+        requirements.txt
+        Dockerfile
+        README.md
       mock_data.py
 
     operational-intelligence/
@@ -66,6 +78,7 @@ ada-pulse-2026/
 
   docs/
     KPI-Analytics-plan.md
+    Operational-Intelligence-plan.md
     Assignment2-Outline.md
     assignment2-Gilbert.md
 ```
@@ -238,6 +251,45 @@ Publish JSON payload in message.data as well as attributes.
 
 However, the Orchestrator should first support the current implementation to avoid breaking the existing pipeline.
 
+### 2.7 Existing KPI Serving API
+
+The repository now contains a read-only FastAPI service over the BigQuery Gold Layer:
+
+```text
+app/kpi-analytics/kpi-serving/
+```
+
+Current behavior:
+
+```text
+1. Exposes GET /health.
+2. Exposes KPI read routes under /kpis/{tenant_id}.
+3. Allows only the configured demo tenant, pulse-demo by default.
+4. Uses parameterized BigQuery queries only.
+5. Returns stable Pydantic response models for domains, metric names, latest KPI rows, and metric history.
+```
+
+Implemented endpoints:
+
+```text
+GET /health
+GET /kpis/{tenant_id}/domains
+GET /kpis/{tenant_id}/metrics?domain={domain}
+GET /kpis/{tenant_id}/latest?domain={domain}
+GET /kpis/{tenant_id}/latest/{domain}/{metric_name}
+GET /kpis/{tenant_id}/metrics/{domain}/{metric_name}/history?limit={limit}
+```
+
+Current configuration:
+
+```text
+BQ_TABLE_ID = ada26-pulse-project.kpi_analytics_gold.gold_kpi_snapshots
+ALLOWED_TENANT_ID = pulse-demo
+HISTORY_DEFAULT_LIMIT = 12
+HISTORY_MAX_LIMIT = 52
+```
+
+The KPI Serving API replaces the previously planned greenfield `kpi-data-serving` folder. Operational Intelligence should build MCP tools on top of `kpi-serving` instead of querying BigQuery directly.
 
 ## 3. Lab 6 Implementation References
 
@@ -346,13 +398,13 @@ This approach is useful if the KPI MCP server is implemented manually as explici
 
 #### `lab6/deliveryservice_mcpserver/app.py`
 
-Used as the preferred reference for the KPI MCP server because the KPI Data Serving API is a REST service that should be exposed as MCP.
+Used as the preferred reference for the KPI MCP server because the KPI Serving API is a REST service that should be exposed as MCP.
 
 Operational Intelligence adaptation:
 
 ```text
 Delivery REST API
-→ KPI Data Serving API
+→ KPI Serving API
 
 delivery service MCP wrapper
 → KPI MCP server wrapper
@@ -365,7 +417,7 @@ Target pattern:
 
 ```text
 BigQuery Gold Layer
-→ KPI Data Serving API
+→ KPI Serving API
 → KPI MCP Server
 → ADK Agents
 ```
@@ -407,7 +459,7 @@ The Operational Intelligence implementation should follow these decisions based 
 1. Use ADK LlmAgent as the base structure for each reasoning agent.
 2. Use FastAPI for Cloud Run exposure of the Orchestrator.
 3. Use MCP tools for KPI data access rather than direct BigQuery access.
-4. Use the REST-to-MCP pattern for wrapping the KPI Data Serving API.
+4. Use the REST-to-MCP pattern for wrapping the KPI Serving API.
 5. Use MCP Inspector to test the KPI MCP server before connecting agents.
 6. Run agents locally with `adk run` before deploying the Orchestrator to Cloud Run.
 7. Keep strict JSON output instructions in each agent prompt.
@@ -449,20 +501,21 @@ KPI Cloud Function
 BigQuery Gold Layer write
 kpis-computed Pub/Sub publish
 local KPI computation
+KPI Serving API over BigQuery
 ```
 
 The following parts are still missing or need to be built:
 
 ```text
-1. KPI Data Serving API
-2. KPI MCP server
-3. Operational Intelligence Orchestrator
-4. Financial Intelligence Agent
-5. Sales & CRM Intelligence Agent
-6. Insight Synthesis Agent
-7. insights-ready Pub/Sub publisher
-8. Cloud Run deployment for Operational Intelligence
-9. end-to-end trace-aware logging
+1. KPI MCP server
+2. Operational Intelligence Orchestrator
+3. Financial Intelligence Agent
+4. Sales & CRM Intelligence Agent
+5. Insight Synthesis Agent
+6. insights-ready Pub/Sub publisher
+7. Cloud Run deployment for Operational Intelligence
+8. end-to-end trace-aware logging
+9. optional KPI Serving API extensions for snapshot and trends endpoints
 ```
 
 The Operational Intelligence plan should therefore start from the actual existing pipeline:
@@ -500,7 +553,7 @@ Operational Intelligence consumes kpis-computed
         |
         | wraps
         v
-[KPI Data Serving API]
+[KPI Serving API]
         |
         | queries
         v
@@ -533,7 +586,7 @@ export KPI_GOLD_TABLE="gold_kpi_snapshots"
 export KPIS_COMPUTED_TOPIC="kpis-computed"
 export INSIGHTS_READY_TOPIC="insights-ready"
 
-export KPI_DATA_SERVICE="kpi-data-serving"
+export KPI_DATA_SERVICE="pulse-kpi-serving"
 export KPI_MCP_SERVICE="kpi-mcp-server"
 export OI_SERVICE="operational-intelligence-orchestrator"
 
@@ -574,111 +627,144 @@ Important note:
 
 The current code uses hardcoded constants. Environment variables are recommended, but not strictly required for the current project state. If environment variables are added, `main.py` should be adjusted to read from `os.environ`.
 
-## 8. KPI Data Serving API
+## 8. KPI Serving API
 
-Operational Intelligence needs a stable read interface for the Gold Layer. The current repository does not yet contain this service. It should be added before or alongside the MCP server.
+Operational Intelligence needs a stable read interface for the Gold Layer. This service now exists as the KPI Serving API in `app/kpi-analytics/kpi-serving/`.
 
-### 7.1 Location
+This means the next Operational Intelligence layer should reuse the existing service instead of adding a separate `kpi-data-serving` implementation.
+
+### 8.1 Location
 
 ```text
-app/kpi-analytics/kpi-data-serving/
-  app.py
+app/kpi-analytics/kpi-serving/
+  main.py
+  router_kpis.py
+  bq_repository.py
+  schemas.py
+  config.py
   requirements.txt
   Dockerfile
+  README.md
 ```
 
-### 7.2 Responsibilities
+### 8.2 Responsibilities
 
 ```text
 1. Query BigQuery Gold Layer.
 2. Return latest KPI values by tenant and domain.
 3. Return metric history by tenant, domain, and metric.
-4. Return a full period snapshot if needed.
-5. Hide BigQuery SQL from downstream agents.
+4. Hide BigQuery SQL from downstream agents.
+5. Restrict access to the configured tenant for the demo.
 ```
 
-### 7.3 Required endpoints
+Planned but not implemented yet:
+
+```text
+1. Return a full period snapshot.
+2. Return summarized trends.
+```
+
+### 8.3 Implemented endpoints
 
 ```text
 GET /health
 GET /kpis/{tenant_id}/domains
+GET /kpis/{tenant_id}/metrics?domain={domain}
 GET /kpis/{tenant_id}/latest?domain={domain}
-GET /kpis/{tenant_id}/history?domain={domain}&metric_name={metric_name}&periods={periods}
+GET /kpis/{tenant_id}/latest/{domain}/{metric_name}
+GET /kpis/{tenant_id}/metrics/{domain}/{metric_name}/history?limit={limit}
+```
+
+### 8.4 Target endpoint extensions
+
+The following endpoints were part of the original plan but are not currently implemented:
+
+```text
 GET /kpis/{tenant_id}/snapshot?period_end={YYYY-MM-DD}
 GET /kpis/{tenant_id}/trends?domain={domain}&periods={periods}
 ```
 
-### 7.4 Query behavior
+They are optional for the MVP because the Financial and Sales agents can call `latest` and `history` through MCP tools.
 
-Latest KPI endpoint:
+### 8.5 Query behavior
 
-```sql
-SELECT
-  tenant_id,
-  period_start,
-  period_end,
-  period_grain,
-  domain,
-  metric_name,
-  metric_value,
-  metric_unit,
-  computed_at,
-  run_id,
-  trace_id
-FROM `ada26-pulse-project.kpi_analytics_gold.gold_kpi_snapshots`
-WHERE tenant_id = @tenant_id
-  AND domain = @domain
-  AND period_end = (
-    SELECT MAX(period_end)
-    FROM `ada26-pulse-project.kpi_analytics_gold.gold_kpi_snapshots`
-    WHERE tenant_id = @tenant_id
-      AND domain = @domain
-  )
-ORDER BY metric_name;
+Latest KPI list endpoint:
+
+```text
+GET /kpis/{tenant_id}/latest?domain={domain}
+```
+
+Current behavior:
+
+```text
+1. Uses ROW_NUMBER over tenant_id, domain, and metric_name.
+2. Selects the newest row per metric using period_end and computed_at.
+3. Supports an optional domain filter.
+4. Returns rows ordered by domain and metric_name.
 ```
 
 History endpoint:
 
-```sql
-SELECT
-  tenant_id,
-  period_start,
-  period_end,
-  period_grain,
-  domain,
-  metric_name,
-  metric_value,
-  metric_unit,
-  computed_at,
-  run_id,
-  trace_id
-FROM `ada26-pulse-project.kpi_analytics_gold.gold_kpi_snapshots`
-WHERE tenant_id = @tenant_id
-  AND domain = @domain
-  AND metric_name = @metric_name
-ORDER BY period_end DESC
-LIMIT @periods;
+```text
+GET /kpis/{tenant_id}/metrics/{domain}/{metric_name}/history?limit={limit}
 ```
 
-### 7.5 Data Serving API dependencies
+Current behavior:
+
+```text
+1. Filters by tenant_id, weekly period_grain, domain, and metric_name.
+2. Orders by period_end descending.
+3. Uses HISTORY_DEFAULT_LIMIT when limit is absent.
+4. Caps limit with HISTORY_MAX_LIMIT.
+5. Returns newest week first.
+```
+
+### 8.6 KPI Serving API dependencies
 
 ```text
 fastapi
 uvicorn[standard]
 google-cloud-bigquery
 pydantic
-python-dotenv
+pydantic-settings
 ```
 
-### 7.6 Cloud Run deployment
+### 8.7 Cloud Run deployment
+
+The current service should be deployed from `app/kpi-analytics/kpi-serving`:
 
 ```bash
-gcloud run deploy "$KPI_DATA_SERVICE"   --source app/kpi-analytics/kpi-data-serving   --region "$REGION"   --set-env-vars PROJECT_ID="$PROJECT_ID",KPI_GOLD_TABLE="${PROJECT_ID}.${KPI_GOLD_DATASET}.${KPI_GOLD_TABLE}"   --allow-unauthenticated   --project "$PROJECT_ID"
+gcloud run deploy "$KPI_DATA_SERVICE"   --source app/kpi-analytics/kpi-serving   --region "$REGION"   --set-env-vars BQ_TABLE_ID="${PROJECT_ID}.${KPI_GOLD_DATASET}.${KPI_GOLD_TABLE}",ALLOWED_TENANT_ID="$TENANT_ID"   --allow-unauthenticated   --project "$PROJECT_ID"
 ```
+
+The runtime service account needs permission to run BigQuery jobs and read the Gold Layer table.
+
+Required roles:
+
+```text
+roles/bigquery.jobUser
+roles/bigquery.dataViewer
+```
+
+### 8.8 Replaced original greenfield design
+
+The original plan expected this location:
+
+```text
+app/kpi-analytics/kpi-data-serving/
+```
+
+That is now superseded by:
+
+```text
+app/kpi-analytics/kpi-serving/
+```
+
+Operational Intelligence and the KPI MCP server should use the implemented `kpi-serving` endpoints.
 
 ## 9. KPI MCP Server
 
-The KPI MCP server exposes the Data Serving API as agent-callable tools.
+The KPI MCP server exposes the existing `kpi-serving` HTTP API as agent-callable tools. This server is not implemented in the current repository yet.
 
 Primary Lab 6 references:
 
@@ -689,7 +775,7 @@ lab6/deliveryservice_mcpserver/app.py
 
 The first example shows how to define explicit FastMCP tools. The second example is the preferred pattern for this project because it demonstrates how a REST service can be exposed as MCP tools.
 
-### 8.1 Location
+### 9.1 Location
 
 ```text
 app/kpi-analytics/kpi-mcp-server/
@@ -698,7 +784,7 @@ app/kpi-analytics/kpi-mcp-server/
   Dockerfile
 ```
 
-### 8.2 Lab example alignment
+### 9.2 Lab example alignment
 
 Use these examples from Lab 6:
 
@@ -717,36 +803,53 @@ Useful for wrapping REST functionality into MCP.
 The KPI MCP server is closest to the REST to MCP conversion pattern:
 
 ```text
-KPI Data Serving API
+KPI Serving API
 → KPI MCP Server
 → ADK agents
 ```
 
-### 8.3 Required MCP tools
+### 9.3 Required MCP tools
 
 ```text
 list_kpi_domains(tenant_id)
 list_kpis_in_domain(tenant_id, domain)
 get_latest_kpis(tenant_id, domain)
 get_kpi_history(tenant_id, domain, metric_name, periods)
+get_latest_kpi(tenant_id, domain, metric_name)
+```
+
+Optional future tool:
+
+```text
 get_period_snapshot(tenant_id, period_end)
 ```
 
-### 8.4 Tool implementation behavior
+This depends on adding a snapshot endpoint to `kpi-serving`.
 
-Each MCP tool should call the KPI Data Serving API.
+### 9.4 Tool implementation behavior
+
+Each MCP tool should call the KPI Serving API.
 
 Example mapping:
 
 ```text
+list_kpi_domains("pulse-demo")
+→ GET /kpis/pulse-demo/domains
+
+list_kpis_in_domain("pulse-demo", "financial")
+→ GET /kpis/pulse-demo/metrics?domain=financial
+
 get_latest_kpis(tenant_id, "financial")
 → GET /kpis/{tenant_id}/latest?domain=financial
 
 get_kpi_history(tenant_id, "financial", "burn_rate", 6)
-→ GET /kpis/{tenant_id}/history?domain=financial&metric_name=burn_rate&periods=6
+→ GET /kpis/{tenant_id}/metrics/financial/burn_rate/history?limit=6
+
+get_latest_kpi(tenant_id, "financial", "burn_rate")
+→ GET /kpis/{tenant_id}/latest/financial/burn_rate
 ```
 
-### 8.5 MCP endpoint
+### 9.5 MCP endpoint
 
 Recommended HTTP endpoint:
 
@@ -754,10 +857,10 @@ Recommended HTTP endpoint:
 /mcp
 ```
 
-### 8.6 Cloud Run deployment
+### 9.6 Cloud Run deployment
 
 ```bash
-gcloud run deploy "$KPI_MCP_SERVICE"   --source app/kpi-analytics/kpi-mcp-server   --region "$REGION"   --set-env-vars KPI_DATA_API_URL="https://YOUR_KPI_DATA_SERVICE_URL"   --allow-unauthenticated   --project "$PROJECT_ID"
+gcloud run deploy "$KPI_MCP_SERVICE"   --source app/kpi-analytics/kpi-mcp-server   --region "$REGION"   --set-env-vars KPI_DATA_API_URL="https://YOUR_KPI_SERVING_SERVICE_URL"   --allow-unauthenticated   --project "$PROJECT_ID"
 ```
 
 ## 10. Operational Intelligence Repository Structure
@@ -1446,8 +1549,8 @@ Recommended order:
 2. Validate that uploading ready.json triggers KPI computation.
 3. Validate that gold_kpi_snapshots is populated in BigQuery.
 4. Validate that kpis-computed is published with tenant_id, run_id, and trace_id attributes.
-5. Add KPI Data Serving API.
-6. Add KPI MCP server wrapping the Data Serving API.
+5. Validate the existing KPI Serving API from app/kpi-analytics/kpi-serving.
+6. Add KPI MCP server wrapping the KPI Serving API.
 7. Add Operational Intelligence Orchestrator skeleton with /health and /pipeline/run.
 8. Add Pub/Sub handler that supports the current attribute-based kpis-computed event.
 9. Add mock Financial, Sales, and Synthesis agents.
@@ -1536,4 +1639,4 @@ app/operational-intelligence/orchestrator-agent/
 
 ## 25. Final Summary
 
-The project already contains the upstream KPI implementation needed to trigger Operational Intelligence. The most important adjustment is that the Operational Intelligence build must consume the actual current `kpis-computed` event format, where `tenant_id`, `run_id`, and `trace_id` are Pub/Sub attributes. The missing middle layer consists of a KPI Data Serving API and KPI MCP server, after which ADK agents can retrieve KPI values and generate insights. The final implementation should preserve the existing GCS and KPI Cloud Function setup, add Cloud Run based Operational Intelligence, and publish a normalized `insights-ready` event for the next domain.
+The project already contains the upstream KPI implementation needed to trigger Operational Intelligence, including GCS ingest, KPI computation, BigQuery Gold Layer writes, `kpis-computed` publishing, and the KPI Serving API. The most important adjustment is that the Operational Intelligence build must consume the actual current `kpis-computed` event format, where `tenant_id`, `run_id`, and `trace_id` are Pub/Sub attributes. The missing middle layer is now the KPI MCP server, after which ADK agents can retrieve KPI values from `kpi-serving` and generate insights. The final implementation should preserve the existing GCS, KPI Cloud Function, and KPI Serving API setup, add Cloud Run based Operational Intelligence, and publish a normalized `insights-ready` event for the next domain.
