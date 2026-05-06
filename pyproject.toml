@@ -5,8 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "adk>=0.0.5",
+    "fastmcp>=3.2.4",
+    "google-adk>=1.32.0",
     "google-cloud-storage>=3.10.1",
+    "google-genai>=1.75.0",
     "pandas>=3.0.2",
+    "pydantic>=2.13.3",
+    "python-dotenv>=1.2.2",
+    "requests>=2.33.1",
 ]
 
 [dependency-groups]
