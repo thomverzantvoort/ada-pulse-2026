@@ -77,7 +77,31 @@ IAM for the runtime service account:
 
 ## MCP integration
 
-Agents should call HTTP only; MCP tools wrap these routes. Responses are typed in OpenAPI for stable JSON shapes.
+The KPI Serving API is also exposed as an MCP server so that ADK agents can call KPI tools directly
+without needing to construct HTTP requests themselves.
+
+`fastapi-mcp` wraps the selected FastAPI route operations into MCP-callable tools using the
+existing OpenAPI schema. No separate MCP server process is needed — the `/mcp` endpoint is
+mounted on the same port as the REST API.
+
+### MCP tools exposed
+
+| Tool | Maps to REST endpoint |
+|---|---|
+| `list_kpi_domains` | `GET /kpis/{tenant_id}/domains` |
+| `list_kpi_metrics` | `GET /kpis/{tenant_id}/metrics` |
+| `get_latest_kpis` | `GET /kpis/{tenant_id}/latest` |
+| `get_latest_kpi_single` | `GET /kpis/{tenant_id}/latest/{domain}/{metric_name}` |
+| `get_kpi_history` | `GET /kpis/{tenant_id}/metrics/{domain}/{metric_name}/history` |
+
+### What was added
+
+- `fastapi-mcp>=0.3.0` added to `requirements.txt`
+- MCP setup added to `main.py`: initialises `FastApiMCP` and mounts it at `/mcp`
+
+The Operational Intelligence agents connect to this endpoint via `McpToolset` with
+`StreamableHTTPConnectionParams`. The MCP URL is passed in via the `KPI_MCP_URL` environment
+variable in the orchestrator service.
 
 ## Health
 
