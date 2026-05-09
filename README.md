@@ -2,7 +2,106 @@
 
 Working repository for Assignment 2 implementation of the Pulse architecture.
 
-This README describes the local development flow for the Operational Intelligence layer. The goal is that every team member can start the same services, on the same ports, in the same order.
+This README describes the complete implementation and deployment workflow for the Operational Intelligence domain.
+
+The implementation follows a two-phase approach:
+
+```text
+Phase 1
+Local validation and functional testing
+
+Phase 2
+Cloud deployment to Google Cloud Platform
+```
+
+The local implementation is always validated first before deployment to Google Cloud Platform. This prevents debugging local implementation issues and cloud infrastructure issues at the same time.
+
+The deployment strategy is therefore:
+
+```text
+1. Build and validate all services locally.
+2. Validate ADK agents locally.
+3. Validate KPI Serving API locally.
+4. Validate KPI MCP Server locally.
+5. Validate the Local Orchestrator pipeline locally.
+6. Validate the full local end-to-end flow.
+7. Deploy the validated services to Google Cloud Platform.
+8. Connect GCS, Pub/Sub, Cloud Functions, Cloud Run, and BigQuery.
+9. Validate the cloud end-to-end flow.
+```
+
+The local architecture acts as the functional reference implementation. Google Cloud deployment is performed only after the local validation checklist succeeds completely.
+
+## Implementation Phases
+
+### Phase 1. Local Validation
+
+The local validation phase focuses on functional correctness.
+
+Validated components:
+
+```text
+KPI Serving API
+KPI MCP Server
+Financial Intelligence Agent
+Sales CRM Intelligence Agent
+Insight Synthesis Agent
+Local Orchestrator
+```
+
+The local environment validates:
+
+```text
+ADK integration
+MCP tool integration
+REST-to-MCP conversion
+agent orchestration
+pipeline execution
+JSON output contracts
+trace propagation
+```
+
+The local implementation flow is:
+
+```text
+KPI Serving API, port 8080
+-> KPI MCP Server, port 8091
+-> Financial Intelligence Agent
+-> Sales CRM Intelligence Agent
+-> Insight Synthesis Agent
+-> Local Orchestrator, port 8090
+```
+
+### Phase 2. Google Cloud Deployment
+
+After successful local validation, the implementation is deployed to Google Cloud Platform.
+
+The cloud deployment adds:
+
+```text
+GCS ingest bucket
+Cloud Function KPI computation
+BigQuery Gold Layer
+Pub/Sub eventing
+Cloud Run deployment
+push subscriptions
+distributed cloud logging
+```
+
+The cloud deployment flow is:
+
+```text
+GCS ingest files
+-> KPI Cloud Function
+-> BigQuery Gold Layer
+-> kpis-computed Pub/Sub topic
+-> Operational Intelligence Orchestrator on Cloud Run
+-> KPI MCP Server on Cloud Run
+-> KPI Serving API on Cloud Run
+-> insights-ready Pub/Sub topic
+```
+
+The Google Cloud deployment phase should only start after the local validation checklist succeeds completely.
 
 ## Project Structure
 
@@ -543,3 +642,517 @@ Use this order before committing local Operational Intelligence work:
 
 - Pipeline status for teammates: [CURRENT_STATE.md](CURRENT_STATE.md) (ingest, KPI function, serving API).
 - Operational Intelligence plan: [docs/Operational-Intelligence-plan.md](docs/Operational-Intelligence-plan.md).
+
+# Cloud Deployment Phase
+
+### Phase 2. Google Cloud Services (GCS)
+
+The following sections describe the deployment of the validated local implementation to Google Cloud Platform.
+
+The objective of this phase is not to debug functionality, but to move the already validated local architecture into managed cloud infrastructure using:
+
+- Cloud Run
+- Cloud Functions
+- Pub/Sub
+- BigQuery
+- GCS
+
+Only continue with this phase after the Local Validation Checklist succeeds completely.
+
+# Cloud Deployment via Google Cloud Console UI
+
+This section describes the cloud deployment workflow using the Google Cloud Console UI. The deployment flow extends the local implementation and moves the services to managed Google Cloud infrastructure.
+
+The target deployment flow is:
+
+```text
+Local repository
+-> GCS ingest bucket
+-> KPI Cloud Function
+-> BigQuery Gold Layer
+-> Pub/Sub
+-> KPI Serving API on Cloud Run
+-> KPI MCP Server on Cloud Run
+-> Operational Intelligence Orchestrator on Cloud Run
+-> insights-ready Pub/Sub topic
+```
+
+The UI-based deployment is suitable for:
+
+- Assignment demonstrations
+- Initial infrastructure setup
+- Team onboarding
+- Service inspection and debugging
+
+CLI deployment remains preferable for automation and CI/CD, but the UI flow is fully valid for the Assignment 2 implementation.
+
+## Cloud Architecture
+
+The deployed architecture is:
+
+```text
+GCS Bucket: pulse-demo-bronze
+        |
+        | ready.json finalized
+        v
+Cloud Function: compute_kpis
+        |
+        | writes
+        v
+BigQuery: kpi_analytics_gold.gold_kpi_snapshots
+        |
+        | publishes
+        v
+Pub/Sub topic: kpis-computed
+        |
+        | push subscription
+        v
+Cloud Run: operational-intelligence-orchestrator
+        |
+        | MCP calls
+        v
+Cloud Run: kpi-mcp-server
+        |
+        | REST calls
+        v
+Cloud Run: kpi-serving
+        |
+        | queries
+        v
+BigQuery Gold Layer
+```
+
+## 5. Enable Required Google Cloud APIs
+
+Open:
+
+```text
+Google Cloud Console
+-> APIs & Services
+-> Library
+```
+
+Enable these APIs:
+
+```text
+Cloud Run API
+Cloud Functions API
+Cloud Build API
+Artifact Registry API
+Pub/Sub API
+BigQuery API
+Eventarc API
+Secret Manager API
+Vertex AI API
+Generative Language API
+```
+
+## 6. Create or Validate GCS Bucket
+
+Open:
+
+```text
+Cloud Storage
+```
+
+Validate that the bucket exists:
+
+```text
+pulse-demo-bronze
+```
+
+If the bucket does not exist:
+
+```text
+Create Bucket
+Name: pulse-demo-bronze
+Region: choose the project region
+Storage class: Standard
+Access control: Uniform
+```
+
+## 7. Upload Ingest Files Through UI
+
+Open:
+
+```text
+Cloud Storage
+-> pulse-demo-bronze
+```
+
+Create a folder:
+
+```text
+ingest/test-run-001/
+```
+
+Upload:
+
+```text
+financial_clean.csv
+sales_marketing_clean.csv
+```
+
+After both CSV files are uploaded, upload:
+
+```text
+ready.json
+```
+
+The ready.json upload should always be the final upload step because it triggers KPI computation.
+
+## 8. Enable and Configure Pub/Sub
+
+### 8.1 Create Pub/Sub topics
+
+Open:
+
+```text
+Pub/Sub
+-> Topics
+```
+
+Create:
+
+```text
+kpis-computed
+insights-ready
+```
+
+### 8.2 Validate Pub/Sub activation
+
+Open:
+
+```text
+Pub/Sub
+-> Topics
+```
+
+Both topics should appear in the list.
+
+## 9. Deploy KPI Cloud Function Through UI
+
+Open:
+
+```text
+Cloud Functions
+-> Create Function
+```
+
+Configuration:
+
+```text
+Name:
+compute_kpis
+
+Region:
+us-central1
+
+Environment:
+2nd gen
+
+Runtime:
+Python 3.11
+```
+
+Trigger:
+
+```text
+Trigger Type:
+Cloud Storage
+
+Bucket:
+pulse-demo-bronze
+
+Event:
+google.cloud.storage.object.v1.finalized
+```
+
+Entry point:
+
+```text
+compute_kpis
+```
+
+After deployment:
+
+- upload ready.json
+- verify KPI rows appear in BigQuery
+- verify kpis-computed is published
+
+## 10. Validate BigQuery Gold Layer
+
+Open:
+
+```text
+BigQuery
+```
+
+Dataset:
+
+```text
+kpi_analytics_gold
+```
+
+Table:
+
+```text
+gold_kpi_snapshots
+```
+
+Validate that KPI rows appear after the Cloud Function execution.
+
+## 11. Deploy KPI Serving API Through Cloud Run UI
+
+Open:
+
+```text
+Cloud Run
+-> Create Service
+```
+
+Configuration:
+
+```text
+Service Name:
+kpi-serving
+
+Region:
+europe-west1
+
+Authentication:
+Allow unauthenticated invocations
+```
+
+Environment variables:
+
+```text
+PROJECT_ID=ada26-pulse-project
+KPI_GOLD_TABLE=ada26-pulse-project.kpi_analytics_gold.gold_kpi_snapshots
+```
+
+After deployment, Cloud Run displays the Service URL.
+
+This URL becomes:
+
+```text
+KPI_SERVING_URL
+```
+
+Validate:
+
+```text
+https://KPI_SERVING_URL/health
+https://KPI_SERVING_URL/docs
+```
+
+## 12. Deploy KPI MCP Server Through Cloud Run UI
+
+The KPI MCP Server follows the Lab 6 REST-to-MCP pattern.
+
+Open:
+
+```text
+Cloud Run
+-> Create Service
+```
+
+Configuration:
+
+```text
+Service Name:
+kpi-mcp-server
+
+Region:
+europe-west1
+
+Authentication:
+Allow unauthenticated invocations
+```
+
+Environment variables:
+
+```text
+KPI_DATA_API_URL=https://KPI_SERVING_URL
+```
+
+This URL becomes:
+
+```text
+KPI_MCP_URL
+```
+
+Expected MCP endpoint:
+
+```text
+https://KPI_MCP_URL/mcp
+```
+
+## 13. Deploy Operational Intelligence Orchestrator Through Cloud Run UI
+
+Open:
+
+```text
+Cloud Run
+-> Create Service
+```
+
+Configuration:
+
+```text
+Service Name:
+operational-intelligence-orchestrator
+
+Region:
+europe-west1
+
+Authentication:
+Allow unauthenticated invocations
+```
+
+Environment variables:
+
+```text
+GOOGLE_GENAI_USE_VERTEXAI=true
+GOOGLE_CLOUD_PROJECT=ada26-pulse-project
+GOOGLE_CLOUD_LOCATION=europe-west1
+MODEL_NAME=gemini-2.5-flash-lite
+KPI_MCP_URL=https://KPI_MCP_URL/mcp
+```
+
+Validate:
+
+```text
+https://OI_URL/health
+```
+
+## 14. Configure Pub/Sub Push Subscription Through UI
+
+Open:
+
+```text
+Pub/Sub
+-> Subscriptions
+-> Create Subscription
+```
+
+Configuration:
+
+```text
+Subscription ID:
+orchestrator-kpis-computed-sub
+
+Topic:
+kpis-computed
+
+Delivery Type:
+Push
+
+Endpoint URL:
+https://OI_URL/pubsub/kpis-computed
+```
+
+## 15. Publish Manual Pub/Sub Test Event Through UI
+
+Open:
+
+```text
+Pub/Sub
+-> Topics
+-> kpis-computed
+-> Publish Message
+```
+
+Message body:
+
+```text
+KPI computation completed
+```
+
+Attributes:
+
+```text
+tenant_id = pulse-demo
+run_id = kpi-run-ui-001
+trace_id = trace-ui-001
+```
+
+## 16. Validate Cloud Logs
+
+Open:
+
+```text
+Cloud Run
+-> operational-intelligence-orchestrator
+-> Logs
+```
+
+Search for:
+
+```text
+trace-ui-001
+```
+
+Expected operations:
+
+```text
+run_pipeline
+financial_intelligence_agent
+sales_crm_intelligence_agent
+insight_synthesis_agent
+publish_insights_ready
+```
+
+## 17. Validate insights-ready Output
+
+Open:
+
+```text
+Pub/Sub
+-> Subscriptions
+```
+
+Create a temporary debug subscription:
+
+```text
+insights-ready-debug-sub
+```
+
+Pull messages and validate the final payload.
+
+## 18. Full End-to-End Validation Flow
+
+```text
+1. Upload ingest files to GCS.
+2. Upload ready.json.
+3. Cloud Function starts KPI computation.
+4. BigQuery Gold Layer is updated.
+5. kpis-computed Pub/Sub event is published.
+6. Pub/Sub triggers Operational Intelligence Orchestrator.
+7. Orchestrator calls Financial and Sales agents.
+8. Agents retrieve KPI data through KPI MCP Server.
+9. Insight Synthesis Agent combines outputs.
+10. Orchestrator publishes insights-ready.
+11. Reporting & Delivery consumes insights-ready.
+```
+
+## 19. Cloud Deployment Validation Checklist
+
+```text
+1. Required Google Cloud APIs enabled.
+2. GCS bucket pulse-demo-bronze exists.
+3. Ingest files uploaded successfully.
+4. ready.json uploaded last.
+5. KPI Cloud Function deployed.
+6. BigQuery Gold Layer populated.
+7. Pub/Sub topics created.
+8. KPI Serving API deployed to Cloud Run.
+9. KPI MCP Server deployed to Cloud Run.
+10. Operational Intelligence Orchestrator deployed.
+11. Pub/Sub push subscription created.
+12. Manual Pub/Sub test event succeeds.
+13. Cloud logs show trace propagation.
+14. insights-ready messages are published.
+15. End-to-end flow validated successfully.
+```
+
