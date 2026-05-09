@@ -27,7 +27,7 @@ def health() -> dict[str, str]:
 
 app.include_router(kpis_router, prefix="/kpis")
 
-# --- MCP Integration ---
+# MCP Integration
 # Exposes selected KPI endpoints as agent-callable MCP tools.
 # Available at: /mcp  (same port as the REST API)
 mcp = FastApiMCP(
