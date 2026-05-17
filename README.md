@@ -132,7 +132,12 @@ ada-pulse-2026/
           sales_crm_agent.py           # SalesCrmIntelligenceAgent
           synthesis_agent.py           # InsightSynthesisAgent
     reporting-delivery/
-      test.py
+      main.py                        # FastAPI app, receives Pub/Sub push, orchestrates pipeline
+      renderer.py                    # renders insight JSON into styled HTML report
+      email_sender.py                # delivers HTML report via Gmail SMTP
+      Dockerfile
+      requirements.txt
+      README.md
   data/
     ingest/
     kpi/
@@ -518,8 +523,17 @@ Cloud Run: pulse-kpi-serving-mcp
         v
 BigQuery Gold Layer
         |
+        | publishes
         v
-insights-ready Pub/Sub topic
+Pub/Sub topic: insights-ready
+        |
+        | push subscription: insights-ready-push-reporting
+        v
+Cloud Run: pulse-reporting-delivery
+        |
+        | renders HTML report and sends via Gmail SMTP
+        v
+Email delivered to configured recipient
 ```
 
 ## 5. Enable Required Google Cloud APIs
@@ -716,7 +730,9 @@ Pipeline run completed - severity=high
 8. Both agents retrieve KPI data via MCP from pulse-kpi-serving-mcp.
 9. InsightSynthesisAgent combines outputs.
 10. Orchestrator publishes insights-ready.
-11. Reporting & Delivery consumes insights-ready.
+11. insights-ready-push-reporting subscription triggers pulse-reporting-delivery.
+12. renderer.py generates styled HTML report from insight payload.
+13. email_sender.py delivers report via Gmail SMTP to configured recipient.****
 ```
 
 ## 18. Cloud Deployment Validation Checklist
@@ -734,7 +750,9 @@ Pipeline run completed - severity=high
 10. Manual /pipeline/run returns consolidated synthesis payload.
 11. Pub/Sub test message triggers orchestrator automatically.
 12. insights-ready messages are published and pullable.
-13. End-to-end flow validated successfully.
+13. pulse-reporting-delivery deployed and /health returns ok.
+14. Pub/Sub push subscription insights-ready-push-reporting created.
+15. Email report delivered to recipient after insights-ready fires.
 ```
 
 ## Notes
