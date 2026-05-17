@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "adk>=0.0.5",
+    "fastapi>=0.136.1",
     "fastmcp>=3.2.4",
+    "jinja2>=3.1",
     "google-adk>=1.32.0",
     "google-cloud-storage>=3.10.1",
     "google-genai>=1.75.0",
@@ -14,6 +16,7 @@ dependencies = [
     "pydantic>=2.13.3",
     "python-dotenv>=1.2.2",
     "requests>=2.33.1",
+    "uvicorn>=0.34",
 ]
 
 [dependency-groups]
